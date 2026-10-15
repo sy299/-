@@ -1,17 +1,6 @@
-# 前端
+backend/target/
 frontend/node_modules/
 frontend/dist/
-
-# Java后端编译产物
-backend/target/
-
-# IDEA配置
+frontend/.payment-verification/
 .idea/
-*.iml
-
-# 日志文件
 *.log
-
-# 系统缓存
-.DS_Store
-Thumbs.db
