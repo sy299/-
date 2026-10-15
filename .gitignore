@@ -1,0 +1,17 @@
+# 前端
+frontend/node_modules/
+frontend/dist/
+
+# Java后端编译产物
+backend/target/
+
+# IDEA配置
+.idea/
+*.iml
+
+# 日志文件
+*.log
+
+# 系统缓存
+.DS_Store
+Thumbs.db
