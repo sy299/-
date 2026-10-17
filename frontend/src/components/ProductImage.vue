@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch } from 'vue'
+import { assetUrl } from '../api'
 
 const props = defineProps({
   src: { type: String, default: '' },
@@ -11,7 +12,7 @@ watch(() => props.src, () => { failed.value = false })
 
 <template>
   <div class="product-image-component" :class="{ failed }">
-    <img v-if="props.src && !failed" :src="props.src" :alt="props.alt" loading="lazy" decoding="async" @error="failed = true">
+    <img v-if="props.src && !failed" :src="assetUrl(props.src)" :alt="props.alt" loading="lazy" decoding="async" @error="failed = true">
     <span v-else>暂无图片</span>
   </div>
 </template>

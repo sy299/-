@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { call } from './api'
+import { assetUrl, call, uploadImage } from './api'
 import ProductImage from './components/ProductImage.vue'
 import RabbitHeader from './components/RabbitHeader.vue'
 import RabbitHomeHero from './components/RabbitHomeHero.vue'
@@ -52,6 +52,15 @@ const login = ref({ username: 'user', password: 'user123' })
 const registerMode = ref(false)
 const registerForm = ref({ username: '', password: '', confirmPassword: '', nickname: '', phone: '' })
 const user = ref(JSON.parse(localStorage.getItem('mall_user') || 'null'))
+const profileForm = ref({ id: null, username: '', nickname: '', avatar: '', phone: '', role: '' })
+const profileLoading = ref(false)
+const profileSaving = ref(false)
+const avatarUploading = ref(false)
+const productImageUploading = ref(false)
+const bannerImageUploading = ref(false)
+const avatarFileInput = ref(null)
+const productCoverInput = ref(null)
+const bannerImageInput = ref(null)
 const addressForm = ref({ receiverName: '', receiverPhone: '', detailAddress: '', isDefault: false })
 const addressEditing = ref(null)
 const selectedCart = ref([])
@@ -71,6 +80,13 @@ const cartCount = computed(() => cart.value.reduce((sum, item) => sum + item.qua
 const selectedTotal = computed(() => cart.value.filter(item => selectedCart.value.includes(item.id)).reduce((sum, item) => sum + Number(item.price) * item.quantity, 0))
 const defaultAddress = computed(() => addresses.value.find(item => item.is_default) || addresses.value[0])
 const selectedAddress = computed(() => addresses.value.find(item => String(item.id) === String(selectedAddressId.value)) || defaultAddress.value)
+const profileInitial = computed(() => (profileForm.value.nickname || user.value?.nickname || '会').slice(0, 1).toUpperCase())
+const profileRole = computed(() => ({ USER: '普通用户', MERCHANT: '商家账号', ADMIN: '平台管理员' }[profileForm.value.role || user.value?.role] || '商城会员'))
+const profileStats = computed(() => ({
+  total: orders.value.length,
+  pending: orders.value.filter(order => order.status === 'PENDING').length,
+  completed: orders.value.filter(order => order.status === 'COMPLETED').length
+}))
 
 async function loadHome() {
   home.value = await call({ url: '/home' })
@@ -151,12 +167,89 @@ async function loadUserData() {
   if (!logged.value || user.value?.role !== 'USER') return
   await Promise.all([loadCart(), loadOrders(), loadAddresses(), loadFavorites()])
 }
+async function loadProfile() {
+  if (!logged.value) return
+  profileLoading.value = true
+  try {
+    const result = await call({ url: '/auth/me' })
+    profileForm.value = { ...profileForm.value, ...result }
+    user.value = result
+    localStorage.setItem('mall_user', JSON.stringify(result))
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    profileLoading.value = false
+  }
+}
+async function saveProfile() {
+  if (profileSaving.value) return
+  if (!String(profileForm.value.nickname || '').trim()) {
+    ElMessage.warning('昵称不能为空')
+    return
+  }
+  profileSaving.value = true
+  try {
+    const result = await call({
+      url: '/auth/profile',
+      method: 'put',
+      data: {
+        nickname: String(profileForm.value.nickname || '').trim(),
+        avatar: String(profileForm.value.avatar || '').trim(),
+        phone: String(profileForm.value.phone || '').trim()
+      }
+    })
+    profileForm.value = { ...profileForm.value, ...result }
+    user.value = result
+    localStorage.setItem('mall_user', JSON.stringify(result))
+    ElMessage.success('个人资料已更新')
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    profileSaving.value = false
+  }
+}
+async function uploadSelectedImage(event, loading, onUploaded, message) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    ElMessage.warning('请选择图片文件')
+    return
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    ElMessage.warning('图片不能超过 5MB')
+    return
+  }
+  loading.value = true
+  try {
+    const result = await uploadImage(file)
+    onUploaded(assetUrl(result.url))
+    ElMessage.success(message)
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    loading.value = false
+  }
+}
+function chooseAvatarImage() { avatarFileInput.value?.click() }
+function chooseProductCover() { productCoverInput.value?.click() }
+function chooseBannerImage() { bannerImageInput.value?.click() }
+function uploadAvatar(event) {
+  return uploadSelectedImage(event, avatarUploading, url => { profileForm.value.avatar = url }, '头像上传成功，请保存资料')
+}
+function uploadProductCover(event) {
+  return uploadSelectedImage(event, productImageUploading, url => { productForm.value.cover = url }, '商品封面上传成功')
+}
+function uploadBannerImage(event) {
+  return uploadSelectedImage(event, bannerImageUploading, url => { bannerForm.value.imageUrl = url }, '轮播图上传成功')
+}
 async function signIn() {
   try {
     const result = await call({ url: '/auth/login', method: 'post', data: login.value })
     localStorage.setItem('mall_token', result.token)
     localStorage.setItem('mall_user', JSON.stringify(result.user))
     user.value = result.user
+    profileForm.value = { ...profileForm.value, ...result.user }
     logged.value = true
     loginOpen.value = false
     await loadUserData()
@@ -186,6 +279,7 @@ function signOut() {
   orders.value = []
   addresses.value = []
   favorites.value = []
+  profileForm.value = { id: null, username: '', nickname: '', avatar: '', phone: '', role: '' }
   view.value = 'home'
   window.location.reload()
 }
@@ -437,6 +531,7 @@ async function go(next) {
   if (next === 'cart') await loadCart()
   if (next === 'orders') await loadOrders()
   if (next === 'addresses') await loadAddresses()
+  if (next === 'profile') await loadProfile()
   if (next === 'manage') await loadManage()
 }
 onMounted(async () => {
@@ -530,6 +625,63 @@ onBeforeUnmount(() => productObserver?.disconnect())
           </div>
         </div>
       </section>
+      <section v-else-if="view === 'profile'" class="content profile-page">
+        <div class="page-title"><small>PERSONAL CENTER</small><h1>个人中心</h1><p>管理个人资料，查看订单和购物状态。</p></div>
+        <div v-if="profileLoading" class="empty profile-loading">正在加载个人资料…</div>
+        <template v-else>
+          <div class="profile-layout">
+            <div class="profile-card profile-summary">
+              <div class="profile-avatar">
+                <img v-if="profileForm.avatar" :src="profileForm.avatar" :alt="profileForm.nickname">
+                <span v-else>{{ profileInitial }}</span>
+              </div>
+              <div class="profile-summary-copy">
+                <span class="profile-role">{{ profileRole }}</span>
+                <h2>{{ profileForm.nickname || user?.nickname || '商城会员' }}</h2>
+                <p>@{{ profileForm.username || user?.username }}</p>
+              </div>
+              <button v-if="user?.role === 'USER'" class="link-button profile-summary-link" type="button" @click="go('orders')">查看全部订单 →</button>
+            </div>
+            <div class="profile-stats">
+              <button type="button" @click="go('orders')"><strong>{{ profileStats.total }}</strong><span>全部订单</span></button>
+              <button type="button" @click="go('orders')"><strong>{{ profileStats.pending }}</strong><span>待支付</span></button>
+              <button type="button" @click="go('orders')"><strong>{{ profileStats.completed }}</strong><span>已完成</span></button>
+            </div>
+          </div>
+          <div class="profile-card profile-editor">
+            <div class="section-title profile-section-title"><div><small>PROFILE SETTINGS</small><h2>个人资料</h2></div><span>资料仅用于订单和账户展示</span></div>
+            <div class="profile-form">
+              <label>头像图片
+                <div class="image-upload-field">
+                  <el-input v-model="profileForm.avatar" placeholder="可粘贴图片 URL"/>
+                  <button class="upload-button" type="button" :disabled="avatarUploading" @click="chooseAvatarImage">{{ avatarUploading ? '上传中…' : '选择图片' }}</button>
+                  <input ref="avatarFileInput" class="hidden-file-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp" @change="uploadAvatar">
+                </div>
+              </label>
+              <label>登录账号<el-input :model-value="profileForm.username" disabled/></label>
+              <label>昵称<el-input v-model="profileForm.nickname" maxlength="50" show-word-limit placeholder="请输入昵称"/></label>
+              <label>手机号<el-input v-model="profileForm.phone" maxlength="30" placeholder="请输入手机号"/></label>
+            </div>
+            <div class="profile-preview">
+              <div class="profile-avatar profile-avatar-small">
+                <img v-if="profileForm.avatar" :src="profileForm.avatar" :alt="profileForm.nickname">
+                <span v-else>{{ profileInitial }}</span>
+              </div>
+              <span>头像预览</span>
+              <button class="primary" type="button" :disabled="profileSaving" @click="saveProfile">{{ profileSaving ? '正在保存…' : '保存资料' }}</button>
+            </div>
+          </div>
+          <div v-if="user?.role === 'USER'" class="profile-card profile-recent">
+            <div class="section-title profile-section-title"><div><small>RECENT ORDERS</small><h2>最近订单</h2></div><button class="link-button" type="button" @click="go('orders')">订单中心 →</button></div>
+            <div v-for="order in orders.slice(0, 3)" :key="order.id" class="row order-row">
+              <div><b>{{ order.product_name_snapshot }}</b><small>订单号 {{ order.order_no }} · {{ order.created_at }}</small></div>
+              <strong>¥{{ order.total_amount }}</strong>
+              <span class="status">{{ order.status }}</span>
+            </div>
+            <div v-if="!orders.length" class="empty profile-empty">还没有订单，去首页挑选一些好物吧。</div>
+          </div>
+        </template>
+      </section>
       <section v-else-if="view === 'cart'" class="content narrow">
         <div class="page-title"><small>YOUR CART</small><h1>购物车</h1><p>选择商品，一次结算。</p></div>
         <div v-for="item in cart" :key="item.id" class="row cart-row" :class="{ unavailable: cartUnavailableReason(item) }"><input v-model="selectedCart" type="checkbox" :value="item.id" :disabled="!!cartUnavailableReason(item)"><ProductImage class="cart-product-image" :src="item.cover" :alt="item.name"/><div><b>{{ item.name }}</b><small v-if="cartUnavailableReason(item)" class="cart-unavailable">{{ cartUnavailableReason(item) }}</small><small>¥{{ Number(item.price).toFixed(2) }}</small></div><span class="quantity"><button @click="updateCart(item,item.quantity-1)">−</button>{{ item.quantity }}<button @click="updateCart(item,item.quantity+1)">＋</button></span><strong>¥{{ (item.price * item.quantity).toFixed(2) }}</strong><button class="link-button" @click="removeCart(item)">删除</button></div>
@@ -554,7 +706,7 @@ onBeforeUnmount(() => productObserver?.disconnect())
         <div v-if="!manageOrders.length" class="empty">暂无待处理订单。</div>
         <div class="product-manager">
           <div class="section-title"><div><small>PRODUCT MANAGEMENT</small><h2>商品发布与库存</h2></div></div>
-          <div class="admin-form product-form"><el-input v-model="productForm.name" placeholder="商品名称"/><el-input v-model="productForm.cover" placeholder="商品封面 URL"/><el-input v-model="productForm.categoryId" placeholder="分类 ID"/><el-input v-model="productForm.price" placeholder="价格"/><el-input v-model="productForm.stock" placeholder="库存"/><el-input v-model="productForm.detail" placeholder="商品详情"/><button class="primary" @click="addProduct">发布商品</button></div>
+          <div class="admin-form product-form"><el-input v-model="productForm.name" placeholder="商品名称"/><div class="image-upload-field"><el-input v-model="productForm.cover" placeholder="商品封面 URL"/><button class="upload-button" type="button" :disabled="productImageUploading" @click="chooseProductCover">{{ productImageUploading ? '上传中…' : '选择封面' }}</button><input ref="productCoverInput" class="hidden-file-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp" @change="uploadProductCover"></div><el-input v-model="productForm.categoryId" placeholder="分类 ID"/><el-input v-model="productForm.price" placeholder="价格"/><el-input v-model="productForm.stock" placeholder="库存"/><el-input v-model="productForm.detail" placeholder="商品详情"/><button class="primary" @click="addProduct">发布商品</button></div>
           <div v-for="product in manageProducts" :key="product.id" class="admin-line product-line"><ProductImage :src="product.cover" :alt="product.name"/><span>{{ product.name }}</span><small>¥{{ product.price }} · 库存 {{ product.stock }} · <b :class="product.status === 'ON_SALE' ? 'on-sale' : 'off-sale'">{{ product.status === 'ON_SALE' ? '已上架' : '已下架' }}</b></small><button class="link-button" @click="toggleProductStatus(product)">{{ product.status === 'ON_SALE' ? '下架' : '上架' }}</button></div>
           <div v-if="!manageProducts.length" class="empty">暂无商品。</div>
         </div>
@@ -562,7 +714,7 @@ onBeforeUnmount(() => productObserver?.disconnect())
           <div class="admin-tabs"><button :class="{active: adminTab === 'categories'}" @click="adminTab = 'categories'">分类</button><button :class="{active: adminTab === 'announcements'}" @click="adminTab = 'announcements'">公告</button><button :class="{active: adminTab === 'banners'}" @click="adminTab = 'banners'">轮播图</button><button :class="{active: adminTab === 'tags'}" @click="adminTab = 'tags'">商家标签</button></div>
           <div v-if="adminTab === 'categories'" class="admin-section"><div class="admin-form"><el-input v-model="categoryForm.name" placeholder="分类名称"/><el-input v-model="categoryForm.logo" placeholder="分类图标 URL（可选）"/><label><input v-model="categoryForm.showOnHome" type="checkbox"> 首页展示</label><button class="primary" @click="addCategory">新增分类</button></div><div v-for="item in adminCategories" :key="item.id" class="admin-line"><span>{{ item.name }}</span><small>{{ item.show_on_home ? '首页展示' : '隐藏' }}</small><button class="link-button" @click="deleteCategory(item.id)">删除</button></div></div>
           <div v-else-if="adminTab === 'announcements'" class="admin-section"><div class="admin-form"><el-input v-model="announcementForm.title" placeholder="公告标题"/><el-input v-model="announcementForm.content" placeholder="公告内容"/><button class="primary" @click="addAnnouncement">发布公告</button></div><div v-for="item in adminAnnouncements" :key="item.id" class="admin-line"><span>{{ item.title }}</span><small>{{ item.content }}</small><button class="link-button" @click="deleteAnnouncement(item.id)">删除</button></div></div>
-          <div v-else-if="adminTab === 'banners'" class="admin-section"><div class="admin-form"><el-input v-model="bannerForm.imageUrl" placeholder="图片 URL"/><el-input v-model="bannerForm.productId" placeholder="关联商品 ID（可选）"/><button class="primary" @click="addBanner">添加轮播图</button></div><div v-for="item in adminBanners" :key="item.id" class="admin-line"><span>轮播图 #{{ item.id }}</span><small>{{ item.image_url }}</small></div></div>
+          <div v-else-if="adminTab === 'banners'" class="admin-section"><div class="admin-form"><div class="image-upload-field"><el-input v-model="bannerForm.imageUrl" placeholder="图片 URL"/><button class="upload-button" type="button" :disabled="bannerImageUploading" @click="chooseBannerImage">{{ bannerImageUploading ? '上传中…' : '选择图片' }}</button><input ref="bannerImageInput" class="hidden-file-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp" @change="uploadBannerImage"></div><el-input v-model="bannerForm.productId" placeholder="关联商品 ID（可选）"/><button class="primary" @click="addBanner">添加轮播图</button></div><div v-for="item in adminBanners" :key="item.id" class="admin-line"><span>轮播图 #{{ item.id }}</span><small>{{ item.image_url }}</small></div></div>
           <div v-else class="admin-section"><div class="admin-form"><el-input v-model="tagForm.merchantId" placeholder="商家 ID"/><el-input v-model="tagForm.tag" placeholder="标签名称"/><el-input v-model="tagForm.description" placeholder="标签说明"/><button class="primary" @click="addTag">设置标签</button></div><div v-for="item in adminTags" :key="item.id" class="admin-line"><span>{{ item.merchantName }} · {{ item.tag }}</span><small>{{ item.description }}</small><button class="link-button" @click="deleteTag(item.id)">删除</button></div></div>
         </div>
       </section>
@@ -658,8 +810,12 @@ onBeforeUnmount(() => productObserver?.disconnect())
 .seckill-card-action:disabled{background:#a7b4c0;cursor:not-allowed}
 .seckill-empty{padding:120px 15px}
 .payment-dialog{display:flex;flex-direction:column;gap:14px}.payment-order-summary{margin:0;color:#536f88;font-size:13px}.payment-order-summary strong{color:#d64f57;font-size:22px}.payment-options{display:grid;gap:9px}.payment-option{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;border:1px solid #d9e7f2;border-radius:6px;background:#fff;color:#345875;text-align:left;cursor:pointer}.payment-option.selected{border-color:#1769d1;background:#f2f8ff;box-shadow:0 0 0 1px #1769d1 inset}.payment-option b{margin-left:auto;color:#1769d1;font-size:11px;font-weight:normal}.payment-mark{display:grid;place-items:center;width:28px;height:28px;border-radius:6px;color:#fff;font-size:15px;font-weight:bold}.payment-mark.alipay{background:#1677ff}.payment-mark.wechat{background:#20b767}.payment-note{margin:0;color:#8a9eaf;font-size:11px;line-height:1.6}
+.profile-page{max-width:980px}.profile-loading{padding:120px 15px}.profile-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,1fr);gap:16px;margin-top:24px}.profile-card{background:#fff;border:1px solid #deebf5;border-radius:8px;padding:22px}.profile-summary{display:flex;align-items:center;gap:16px;min-height:136px}.profile-avatar{width:78px;height:78px;display:grid;place-items:center;flex:0 0 78px;border-radius:50%;overflow:hidden;background:#dcecff;color:#1769d1;font-size:30px;font-weight:700}.profile-avatar img{width:100%;height:100%;object-fit:cover}.profile-summary-copy{min-width:0}.profile-role{display:inline-block;color:#1769d1;background:#edf6ff;border-radius:4px;padding:4px 7px;font-size:11px}.profile-summary h2{margin:9px 0 4px;color:#244b6e;font-size:24px}.profile-summary p{margin:0;color:#8ba0b3;font-size:12px}.profile-summary-link{margin-left:auto;white-space:nowrap}.profile-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.profile-stats button{border:1px solid #deebf5;background:#fff;border-radius:8px;padding:18px 10px;text-align:left;cursor:pointer}.profile-stats button:hover{border-color:#1769d1;box-shadow:0 6px 15px #1769d11c}.profile-stats strong,.profile-stats span{display:block}.profile-stats strong{color:#1769d1;font-size:28px}.profile-stats span{margin-top:7px;color:#8299ad;font-size:12px}.profile-editor,.profile-recent{margin-top:16px}.profile-section-title{margin:0 0 18px}.profile-section-title h2{font-size:20px}.profile-form{display:grid;grid-template-columns:1fr 1fr;gap:14px 18px}.profile-form label{display:flex;flex-direction:column;gap:7px;color:#637d96;font-size:12px}.profile-preview{display:flex;align-items:center;gap:10px;margin-top:20px;padding-top:18px;border-top:1px solid #edf2f7;color:#8299ad;font-size:12px}.profile-avatar-small{width:42px;height:42px;flex-basis:42px;font-size:17px}.profile-preview button{margin-left:auto}.profile-empty{padding:40px}.profile-recent .row{margin-top:10px}
+.image-upload-field{display:flex;align-items:center;gap:8px;min-width:0}.image-upload-field .el-input{min-width:0;flex:1}.upload-button{border:1px solid #a9c9e7;border-radius:5px;background:#eff7ff;color:#1769d1;padding:8px 10px;cursor:pointer;white-space:nowrap;font-size:12px}.upload-button:hover{background:#e1f0ff}.upload-button:disabled{cursor:not-allowed;opacity:.65}.hidden-file-input{display:none}
 @media(max-width:700px){.product-detail{grid-template-columns:1fr;gap:16px;padding:15px}.detail-image{max-height:420px}.detail-info{padding:2px}.detail-info h1{font-size:22px}.detail-submit{max-width:none}}
 @media(max-width:520px){.seckill-item{grid-template-columns:68px minmax(0,1fr);gap:9px;padding:9px}.seckill-image{width:68px;height:68px}.seckill-item>.primary{grid-column:1/-1;width:100%}}
 @media(max-width:820px){.seckill-page-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.seckill-page-title .primary{position:static;margin-top:8px}.seckill-page-grid{grid-template-columns:1fr}.seckill-card-image{height:200px}}
+@media(max-width:760px){.profile-layout{grid-template-columns:1fr}.profile-summary{flex-wrap:wrap}.profile-summary-link{flex-basis:100%;margin-left:94px}.profile-form{grid-template-columns:1fr}}
+@media(max-width:480px){.profile-card{padding:16px}.profile-summary h2{font-size:21px}.profile-stats strong{font-size:23px}.profile-preview{align-items:flex-start;flex-wrap:wrap}.profile-preview button{flex-basis:100%;margin:4px 0 0}}
 </style>

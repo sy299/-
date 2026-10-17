@@ -4,7 +4,7 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/community_mall?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false
     username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD}
+    password: ${DB_PASSWORD:1234}
     hikari:
       maximum-pool-size: 32
       minimum-idle: 8
@@ -14,14 +14,35 @@ spring:
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:radis}
+      timeout: 2s
+      connect-timeout: 1s
+      lettuce:
+        pool:
+          max-active: 256
+          max-idle: 64
+          min-idle: 16
+          max-wait: 500ms
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
 mall:
   jwt-secret: change-this-secret-to-a-long-random-value-for-production
   jwt-expire-hours: 24
+  upload-dir: ${MALL_UPLOAD_DIR:./uploads}
   seckill:
-    max-concurrency: 24
+    redis-key-prefix: mall:seckill
+    seed-demo-activities: true
+    # 本地压测临时关闭一人一单；测试完成后改回 true
+    enforce-one-order-per-user: false
   payment:
     mode: unconfigured
     alipay:

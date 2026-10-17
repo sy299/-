@@ -26,8 +26,9 @@ function submitSearch() {
   <div class="rabbit-header">
     <div class="rabbit-topnav">
       <div class="rabbit-container topnav-inner">
-        <span>优选商城 · 小兔鲜式品质生活</span>
+        <span>优选商城</span>
         <nav>
+          <button v-if="logged" type="button" @click="emit('go', 'profile')">个人中心</button>
           <button v-if="logged && user?.role === 'USER'" type="button" @click="emit('go', 'orders')">我的订单</button>
           <button v-if="logged && user?.role === 'USER'" type="button" @click="emit('go', 'addresses')">收货地址</button>
           <button v-if="logged && (isAdmin || isMerchant)" type="button" @click="emit('go', 'manage')">商家工作台</button>

@@ -4,22 +4,34 @@
 
 ## 技术栈
 
-- 后端：Java 17+（推荐 24/25）、Spring Boot 3.4、MyBatis-Plus、Spring Security、JWT、MySQL 8
+- 后端：Java 17+（推荐 24/25）、Spring Boot 3.4、MyBatis-Plus、Spring Security、JWT、MySQL 8、Redis 7+
 - 前端：Node 18+（推荐 24）、Vue 3、Vite、Element Plus、Vue Router、Axios
 - 目录：backend 后端服务，frontend 管理与用户端 SPA，database/schema.sql 数据库脚本
 
 ## 快速启动
 
-1. 创建数据库并导入 database/schema.sql；已有旧数据库则额外执行 database/migration-v2.sql 和 database/migration-v3-products.sql。
+1. 创建数据库并导入 database/schema.sql、database/migration-v4-seckill.sql、database/seed-seckill.sql；已有旧数据库则额外执行 database/migration-v2.sql、database/migration-v3-products.sql、database/migration-v5-seckill-more.sql、database/migration-v6-seckill-on-sale.sql。
 2. 修改 backend/src/main/resources/application.yml 中的数据库账号密码。
-3. 后端执行 mvn spring-boot:run（或使用 IDE 启动 CommunityMallApplication）。
-4. 前端执行 npm install、npm run dev，访问 Vite 输出地址。
+3. 启动 Redis（默认 `localhost:6379`，密码为 `radis`），例如：`docker run --name community-mall-redis -p 6379:6379 -d redis:7-alpine redis-server --requirepass radis`。
+4. 首次启动前进入 `frontend` 执行 `npm install`。
+5. 使用 IDE 启动 `CommunityMallApplication`，启动类会同时启动 Spring Boot 后端和 Vite 前端；访问 `http://localhost:5173`。
+
+如果 `5173` 已经有前端进程在运行，启动类会复用现有前端，不会重复启动。
 
 默认种子账号：admin / admin123（管理员）、merchant / merchant123（商家）、user / user123（普通用户）。生产环境请立即修改密码与 JWT 密钥。
 
 ## 核心模块
 
-用户注册/资料、商家/管理员与 JWT 登录、商品分类与商品、购物车合并结算、收货地址、立即购买、订单状态与退款、确认收货与评价、收藏、公告、轮播图、商家平台标签。管理员和商家接口通过角色注解进行隔离，订单的商品名称、封面、价格及收货信息会保存快照。
+用户注册/资料、头像上传、商家/管理员与 JWT 登录、商品分类与商品、商品封面和轮播图上传、购物车合并结算、收货地址、立即购买、订单状态与退款、确认收货与评价、收藏、公告、轮播图、商家平台标签。管理员和商家接口通过角色注解进行隔离，订单的商品名称、封面、价格及收货信息会保存快照。
+
+## 个人中心与秒杀
+
+- 登录后从顶部“个人中心”进入个人资料页，可查看头像、账号、昵称、手机号、订单统计和最近订单，并修改头像地址、昵称及手机号。
+- 秒杀库存会在活动开始前预热到 Redis。抢购请求通过 Lua 脚本原子完成库存扣减和用户去重，只有 Redis 抢到名额的请求才会进入 MySQL 事务，数据库仍负责最终库存、订单和“一人一单”约束。
+- Redis 地址可通过 `REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` 覆盖，秒杀 key 前缀可通过 `mall.seckill.redis-key-prefix` 配置。
+- 开发环境启动时会幂等补齐 1 到 6 号商品的演示秒杀活动；生产环境可将 `mall.seckill.seed-demo-activities` 设为 `false`，改用数据库迁移脚本管理活动。
+
+这套链路针对十万级瞬时抢购请求设计，能把绝大多数请求挡在 Redis 层，避免请求全部争抢 MySQL 行锁。生产环境仍应使用 Redis 主从/哨兵或集群、负载均衡和至少 2 个后端实例，并在网关层限流；单台开发机和单个 Redis 实例不能据此保证十万真实并发的吞吐。
 
 ## 支付接入
 

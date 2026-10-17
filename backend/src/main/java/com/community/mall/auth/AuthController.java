@@ -14,7 +14,9 @@ public class AuthController {
   public AuthController(JdbcTemplate db, PasswordEncoder encoder, JwtService jwt){this.db=db;this.encoder=encoder;this.jwt=jwt;}
   public record Login(@NotBlank String username,@NotBlank String password){}
   public record Register(@NotBlank String username,@NotBlank @Size(min=6,max=72) String password,@NotBlank String nickname,String avatar,String phone){}
-  public record Profile(@NotBlank String nickname,String avatar,String phone){}
+  public record Profile(@NotBlank @Size(max = 50) String nickname,
+                         @Size(max = 500) String avatar,
+                         @Size(max = 30) String phone){}
   @PostMapping("/login") public ApiResponse<?> login(@Valid @RequestBody Login in){
     var rows=db.queryForList("select id,username,password,nickname,avatar,role from sys_user where username=? and enabled=1",in.username());
     if(rows.isEmpty() || !encoder.matches(in.password(),(String)rows.get(0).get("password"))) throw new BusinessException("用户名或密码错误");
@@ -29,6 +31,7 @@ public class AuthController {
   }
   @GetMapping("/me") public ApiResponse<?> me(java.security.Principal p){ return ApiResponse.ok(db.queryForMap("select id,username,nickname,avatar,phone,role from sys_user where id=?",p.getName())); }
   @PutMapping("/profile") public ApiResponse<?> profile(@Valid @RequestBody Profile in,java.security.Principal p){
-    db.update("update sys_user set nickname=?,avatar=?,phone=? where id=?",in.nickname(),in.avatar(),in.phone(),p.getName()); return ApiResponse.ok();
+    db.update("update sys_user set nickname=?,avatar=?,phone=? where id=?",in.nickname(),in.avatar(),in.phone(),p.getName());
+    return ApiResponse.ok(db.queryForMap("select id,username,nickname,avatar,phone,role from sys_user where id=?",p.getName()));
   }
 }
